@@ -51,8 +51,6 @@ vr::EVRInitError HMDDevice::Activate(uint32_t unObjectId)
     hid_free_enumeration(head);
 
     // ── Display configuration ──────────────────────────────────────────
-    DisplayConfig display{};
-
     char hwid_buf[9];
     vr::VRSettings()->GetString(kDisplaySection, "HwId", hwid_buf, sizeof(hwid_buf));
     std::string hwid(hwid_buf, hwid_buf + std::strlen(hwid_buf));
@@ -61,22 +59,22 @@ vr::EVRInitError HMDDevice::Activate(uint32_t unObjectId)
 
     if (direct_mode) {
         DriverLog("VETi HMD: starting in direct mode");
-        display.on_desktop = false;
-        display.window_x = -1;
-        display.window_y = -1;
-        display.window_width = vr::VRSettings()->GetInt32(kDisplaySection, "window_width");
-        display.window_height = vr::VRSettings()->GetInt32(kDisplaySection, "window_height");
+        display_config_.on_desktop = false;
+        display_config_.window_x = -1;
+        display_config_.window_y = -1;
+        display_config_.window_width = vr::VRSettings()->GetInt32(kDisplaySection, "window_width");
+        display_config_.window_height = vr::VRSettings()->GetInt32(kDisplaySection, "window_height");
     }
 #ifdef _WIN32
     else {
         Monitor monitor;
         if (getMonitor(hwid, monitor)) {
             DriverLog("VETi HMD: starting in extended mode");
-            display.on_desktop = true;
-            display.window_x = monitor.window_x;
-            display.window_y = monitor.window_y;
-            display.window_width = static_cast<int32_t>(monitor.width);
-            display.window_height = static_cast<int32_t>(monitor.height);
+            display_config_.on_desktop = true;
+            display_config_.window_x = monitor.window_x;
+            display_config_.window_y = monitor.window_y;
+            display_config_.window_width = static_cast<int32_t>(monitor.width);
+            display_config_.window_height = static_cast<int32_t>(monitor.height);
         } else {
             DriverLog("VETi HMD: failed to find display");
             return vr::VRInitError_Init_HmdNotFound;
@@ -85,20 +83,18 @@ vr::EVRInitError HMDDevice::Activate(uint32_t unObjectId)
 #else
     else {
         DriverLog("VETi HMD: extended mode not supported on this platform, using direct mode settings");
-        display.on_desktop = false;
-        display.window_x = -1;
-        display.window_y = -1;
-        display.window_width = vr::VRSettings()->GetInt32(kDisplaySection, "window_width");
-        display.window_height = vr::VRSettings()->GetInt32(kDisplaySection, "window_height");
+        display_config_.on_desktop = false;
+        display_config_.window_x = -1;
+        display_config_.window_y = -1;
+        display_config_.window_width = vr::VRSettings()->GetInt32(kDisplaySection, "window_width");
+        display_config_.window_height = vr::VRSettings()->GetInt32(kDisplaySection, "window_height");
     }
 #endif
 
-    display.render_width = display.window_width;
-    display.render_height = display.window_height;
-    display.l_display_rotation = vr::VRSettings()->GetFloat(kDisplaySection, "l_display_rotation");
-    display.r_display_rotation = vr::VRSettings()->GetFloat(kDisplaySection, "r_display_rotation");
-
-    display_component_ = std::make_unique<HMDDisplayComponent>(display);
+    display_config_.render_width = display_config_.window_width;
+    display_config_.render_height = display_config_.window_height;
+    display_config_.l_display_rotation = vr::VRSettings()->GetFloat(kDisplaySection, "l_display_rotation");
+    display_config_.r_display_rotation = vr::VRSettings()->GetFloat(kDisplaySection, "r_display_rotation");
 
     // ── Properties ─────────────────────────────────────────────────────
     // Properties are stored in containers, usually one per device index.
@@ -125,7 +121,7 @@ vr::EVRInitError HMDDevice::Activate(uint32_t unObjectId)
     vr::VRProperties()->SetFloatProperty(container, vr::Prop_SecondsFromVsyncToPhotons_Float, 0.11f);
 
     // Avoid "not fullscreen" warnings from vrmonitor
-    vr::VRProperties()->SetBoolProperty(container, vr::Prop_IsOnDesktop_Bool, display.on_desktop);
+    vr::VRProperties()->SetBoolProperty(container, vr::Prop_IsOnDesktop_Bool, display_config_.on_desktop);
     vr::VRProperties()->SetBoolProperty(container, vr::Prop_DisplayDebugMode_Bool, false);
 
     // This tells the UI what to show the user for bindings for this device.
@@ -177,7 +173,7 @@ void HMDDevice::EnterStandby()
 void* HMDDevice::GetComponent(const char* pchComponentNameAndVersion)
 {
     if (std::strcmp(pchComponentNameAndVersion, vr::IVRDisplayComponent_Version) == 0)
-        return display_component_.get();
+        return static_cast<vr::IVRDisplayComponent*>(this);
     return nullptr;
 }
 
@@ -264,46 +260,41 @@ void HMDDevice::PoseUpdateThread()
     }
 }
 
-// ── HMDDisplayComponent ───────────────────────────────────────────────────
+// ── IVRDisplayComponent ───────────────────────────────────────────────────
 
-HMDDisplayComponent::HMDDisplayComponent(const DisplayConfig& config)
-    : config_(config)
+void HMDDevice::GetWindowBounds(int32_t* pnX, int32_t* pnY, uint32_t* pnWidth, uint32_t* pnHeight)
 {
+    *pnX = display_config_.window_x;
+    *pnY = display_config_.window_y;
+    *pnWidth = static_cast<uint32_t>(display_config_.window_width);
+    *pnHeight = static_cast<uint32_t>(display_config_.window_height);
 }
 
-void HMDDisplayComponent::GetWindowBounds(int32_t* pnX, int32_t* pnY, uint32_t* pnWidth, uint32_t* pnHeight)
+bool HMDDevice::IsDisplayOnDesktop()
 {
-    *pnX = config_.window_x;
-    *pnY = config_.window_y;
-    *pnWidth = static_cast<uint32_t>(config_.window_width);
-    *pnHeight = static_cast<uint32_t>(config_.window_height);
+    return display_config_.on_desktop;
 }
 
-bool HMDDisplayComponent::IsDisplayOnDesktop()
-{
-    return config_.on_desktop;
-}
-
-bool HMDDisplayComponent::IsDisplayRealDisplay()
+bool HMDDevice::IsDisplayRealDisplay()
 {
     return true;
 }
 
-void HMDDisplayComponent::GetRecommendedRenderTargetSize(uint32_t* pnWidth, uint32_t* pnHeight)
+void HMDDevice::GetRecommendedRenderTargetSize(uint32_t* pnWidth, uint32_t* pnHeight)
 {
-    *pnWidth = static_cast<uint32_t>(config_.render_width);
-    *pnHeight = static_cast<uint32_t>(config_.render_height);
+    *pnWidth = static_cast<uint32_t>(display_config_.render_width);
+    *pnHeight = static_cast<uint32_t>(display_config_.render_height);
 }
 
-void HMDDisplayComponent::GetEyeOutputViewport(vr::EVREye eEye, uint32_t* pnX, uint32_t* pnY, uint32_t* pnWidth, uint32_t* pnHeight)
+void HMDDevice::GetEyeOutputViewport(vr::EVREye eEye, uint32_t* pnX, uint32_t* pnY, uint32_t* pnWidth, uint32_t* pnHeight)
 {
     *pnY = 0;
-    *pnWidth = static_cast<uint32_t>(config_.window_width) / 2;
-    *pnHeight = static_cast<uint32_t>(config_.window_height);
-    *pnX = (eEye == vr::Eye_Left) ? 0 : static_cast<uint32_t>(config_.window_width) / 2;
+    *pnWidth = static_cast<uint32_t>(display_config_.window_width) / 2;
+    *pnHeight = static_cast<uint32_t>(display_config_.window_height);
+    *pnX = (eEye == vr::Eye_Left) ? 0 : static_cast<uint32_t>(display_config_.window_width) / 2;
 }
 
-void HMDDisplayComponent::GetProjectionRaw(vr::EVREye, float* pfLeft, float* pfRight, float* pfTop, float* pfBottom)
+void HMDDevice::GetProjectionRaw(vr::EVREye, float* pfLeft, float* pfRight, float* pfTop, float* pfBottom)
 {
     *pfLeft = -1.0f;
     *pfRight = 1.0f;
@@ -311,11 +302,11 @@ void HMDDisplayComponent::GetProjectionRaw(vr::EVREye, float* pfLeft, float* pfR
     *pfBottom = 1.0f;
 }
 
-vr::DistortionCoordinates_t HMDDisplayComponent::ComputeDistortion(vr::EVREye eEye, float fU, float fV)
+vr::DistortionCoordinates_t HMDDevice::ComputeDistortion(vr::EVREye eEye, float fU, float fV)
 {
     double angle = (eEye == vr::Eye_Left)
-        ? DEG_TO_RAD(config_.l_display_rotation)
-        : DEG_TO_RAD(config_.r_display_rotation);
+        ? DEG_TO_RAD(display_config_.l_display_rotation)
+        : DEG_TO_RAD(display_config_.r_display_rotation);
 
     float u = fU - 0.5f;
     float v = fV - 0.5f;
@@ -331,7 +322,7 @@ vr::DistortionCoordinates_t HMDDisplayComponent::ComputeDistortion(vr::EVREye eE
     return coords;
 }
 
-bool HMDDisplayComponent::ComputeInverseDistortion(vr::HmdVector2_t*, vr::EVREye, uint32_t, float, float)
+bool HMDDevice::ComputeInverseDistortion(vr::HmdVector2_t*, vr::EVREye, uint32_t, float, float)
 {
     return false;
 }

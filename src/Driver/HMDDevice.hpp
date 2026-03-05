@@ -29,24 +29,6 @@ struct DisplayConfig {
     double r_display_rotation = 0.0;
 };
 
-// ── Display component ──────────────────────────────────────────────────────
-class HMDDisplayComponent : public vr::IVRDisplayComponent {
-public:
-    explicit HMDDisplayComponent(const DisplayConfig& config);
-
-    void GetWindowBounds(int32_t* pnX, int32_t* pnY, uint32_t* pnWidth, uint32_t* pnHeight) override;
-    bool IsDisplayOnDesktop() override;
-    bool IsDisplayRealDisplay() override;
-    void GetRecommendedRenderTargetSize(uint32_t* pnWidth, uint32_t* pnHeight) override;
-    void GetEyeOutputViewport(vr::EVREye eEye, uint32_t* pnX, uint32_t* pnY, uint32_t* pnWidth, uint32_t* pnHeight) override;
-    void GetProjectionRaw(vr::EVREye eEye, float* pfLeft, float* pfRight, float* pfTop, float* pfBottom) override;
-    vr::DistortionCoordinates_t ComputeDistortion(vr::EVREye eEye, float fU, float fV) override;
-    bool ComputeInverseDistortion(vr::HmdVector2_t* pResult, vr::EVREye eEye, uint32_t unChannel, float fU, float fV) override;
-
-private:
-    DisplayConfig config_;
-};
-
 // ── HMD device ─────────────────────────────────────────────────────────────
 
 enum class HMDInput {
@@ -55,10 +37,10 @@ enum class HMDInput {
     COUNT
 };
 
-class HMDDevice : public IVRDevice {
+class HMDDevice : public IVRDevice, public vr::IVRDisplayComponent {
 public:
     explicit HMDDevice(std::string serial);
-    ~HMDDevice() override = default;
+    ~HMDDevice() override { Deactivate(); }
 
     // IVRDevice
     std::string GetSerial() override;
@@ -74,6 +56,16 @@ public:
     void DebugRequest(const char* pchRequest, char* pchResponseBuffer, uint32_t unResponseBufferSize) override;
     vr::DriverPose_t GetPose() override;
 
+    // IVRDisplayComponent
+    void GetWindowBounds(int32_t* pnX, int32_t* pnY, uint32_t* pnWidth, uint32_t* pnHeight) override;
+    bool IsDisplayOnDesktop() override;
+    bool IsDisplayRealDisplay() override;
+    void GetRecommendedRenderTargetSize(uint32_t* pnWidth, uint32_t* pnHeight) override;
+    void GetEyeOutputViewport(vr::EVREye eEye, uint32_t* pnX, uint32_t* pnY, uint32_t* pnWidth, uint32_t* pnHeight) override;
+    void GetProjectionRaw(vr::EVREye eEye, float* pfLeft, float* pfRight, float* pfTop, float* pfBottom) override;
+    vr::DistortionCoordinates_t ComputeDistortion(vr::EVREye eEye, float fU, float fV) override;
+    bool ComputeInverseDistortion(vr::HmdVector2_t* pResult, vr::EVREye eEye, uint32_t unChannel, float fU, float fV) override;
+
 private:
     void PoseUpdateThread();
 
@@ -83,7 +75,7 @@ private:
     std::atomic<bool> is_active_{false};
     std::atomic<uint32_t> device_index_{vr::k_unTrackedDeviceIndexInvalid};
 
-    std::unique_ptr<HMDDisplayComponent> display_component_;
+    DisplayConfig display_config_;
     std::unique_ptr<hid_device, decltype(&hid_close)> hid_{nullptr, &hid_close};
 
     std::mutex pose_mutex_;

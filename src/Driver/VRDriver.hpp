@@ -13,7 +13,7 @@ namespace VETiDriver {
 
 class VRDriver : public IVRDriver {
 public:
-    // IVRDriver interface
+    // ── IVRDriver interface ────────────────────────────────────────────
     std::vector<std::shared_ptr<IVRDevice>> GetDevices() override;
     std::vector<vr::VREvent_t> GetOpenVREvents() override;
     std::chrono::milliseconds GetLastFrameTime() override;
@@ -24,12 +24,24 @@ public:
     vr::IVRServerDriverHost* GetDriverHost() override;
     void Log(std::string message) override;
 
-    // IServerTrackedDeviceProvider
+    // ── IServerTrackedDeviceProvider ────────────────────────────────────
+    /// Called by vrserver after it receives a pointer back from HmdDriverFactory.
+    /// Do resource allocations here (not in the constructor).
     vr::EVRInitError Init(vr::IVRDriverContext* pDriverContext) override;
+
+    /// Called just before the driver is unloaded from vrserver.
     void Cleanup() override;
+
+    /// Called in the main loop of vrserver. Poll events and update devices here.
     void RunFrame() override;
+
+    /// Returns true if the driver wants to block Standby mode.
     bool ShouldBlockStandbyMode() override;
+
+    /// Called when the system enters a period of inactivity.
     void EnterStandby() override;
+
+    /// Called when the system is waking up from inactivity.
     void LeaveStandby() override;
 
     ~VRDriver() override = default;
