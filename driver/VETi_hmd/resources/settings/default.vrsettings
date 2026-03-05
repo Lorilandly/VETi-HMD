@@ -1,0 +1,16 @@
+{
+	"driver_VETi_hmd": {
+		"enable": true,
+		"serial_number": "VETi_HMD_001",
+		"model_number": "VETi_HMD_v1"
+	},
+	"VETi_hmd_display": {
+		"HwId": "TDO0103",
+		"window_width": 3840,
+		"window_height": 1920,
+		"l_display_rotation": -3.0,
+		"r_display_rotation": 0.0,
+		"vsync_to_photons": 0.011,
+		"display_frequency": 0
+	}
+}

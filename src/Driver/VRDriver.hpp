@@ -1,0 +1,45 @@
+#pragma once
+
+#include <vector>
+#include <memory>
+#include <chrono>
+#include <string>
+
+#include <openvr_driver.h>
+#include "IVRDriver.hpp"
+#include "IVRDevice.hpp"
+
+namespace VETiDriver {
+
+class VRDriver : public IVRDriver {
+public:
+    // IVRDriver interface
+    std::vector<std::shared_ptr<IVRDevice>> GetDevices() override;
+    std::vector<vr::VREvent_t> GetOpenVREvents() override;
+    std::chrono::milliseconds GetLastFrameTime() override;
+    bool AddDevice(std::shared_ptr<IVRDevice> device) override;
+    SettingsValue GetSettingsValue(std::string key) override;
+    vr::IVRDriverInput* GetInput() override;
+    vr::CVRPropertyHelpers* GetProperties() override;
+    vr::IVRServerDriverHost* GetDriverHost() override;
+    void Log(std::string message) override;
+
+    // IServerTrackedDeviceProvider
+    vr::EVRInitError Init(vr::IVRDriverContext* pDriverContext) override;
+    void Cleanup() override;
+    void RunFrame() override;
+    bool ShouldBlockStandbyMode() override;
+    void EnterStandby() override;
+    void LeaveStandby() override;
+
+    ~VRDriver() override = default;
+
+private:
+    std::vector<std::shared_ptr<IVRDevice>> devices_;
+    std::vector<vr::VREvent_t> openvr_events_;
+    std::chrono::milliseconds frame_timing_ = std::chrono::milliseconds(16);
+    std::chrono::system_clock::time_point last_frame_time_ = std::chrono::system_clock::now();
+    std::string settings_key_ = "driver_VETi_hmd";
+};
+
+} // namespace VETiDriver
