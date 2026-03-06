@@ -49,6 +49,8 @@ vr::EVRInitError HMDDevice::Activate(uint32_t unObjectId)
         }
     }
     hid_free_enumeration(head);
+    if (hid_)
+        hid_set_nonblocking(hid_.get(), 0);
 
     // ── Display configuration ──────────────────────────────────────────
     char hwid_buf[9];
@@ -208,55 +210,61 @@ void HMDDevice::PoseUpdateThread()
     std::deque<double> rolls, pitches, yaws;
 
     while (is_active_) {
+        if (!hid_) break;
+
+        // Block the thread in the kernel until the OS delivers a HID report from
+        // the device. No CPU is consumed while waiting. The 100ms timeout is not
+        // a polling interval — it exists solely so the loop can re-evaluate
+        // is_active_ and exit promptly when Deactivate() is called, rather than
+        // blocking indefinitely waiting for a report that may never arrive.
         float accel[3];
-        if (hid_ && hid_read(hid_.get(), reinterpret_cast<unsigned char*>(accel), sizeof(accel)) > 0) {
-            double x = accel[0], y = accel[1], z = accel[2];
-            double mag = std::sqrt(x * x + y * y + z * z);
+        int bytes = hid_read_timeout(hid_.get(), reinterpret_cast<unsigned char*>(accel), sizeof(accel), 100);
 
-            constexpr double kMinMagnitude = 1e-6;
-            if (mag < kMinMagnitude) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(5));
-                continue;
-            }
+        if (bytes < 0) break;     // device error or disconnected
+        if (bytes == 0) continue; // 100ms elapsed with no report; re-check is_active_
 
-            double roll  = M_PI / 2.0 - std::acos(x / mag);
-            double pitch = M_PI / 2.0 - std::acos(y / mag);
-            double yaw   = roll;
+        double x = accel[0], y = accel[1], z = accel[2];
+        double mag = std::sqrt(x * x + y * y + z * z);
 
-            rolls.push_back(roll);
-            pitches.push_back(pitch);
-            yaws.push_back(yaw);
-            if (rolls.size() > 5) {
-                rolls.pop_front();
-                pitches.pop_front();
-                yaws.pop_front();
-            }
+        constexpr double kMinMagnitude = 1e-6;
+        if (mag < kMinMagnitude)
+            continue;
 
-            roll  = std::accumulate(rolls.begin(),   rolls.end(),   0.0) / static_cast<double>(rolls.size());
-            pitch = std::accumulate(pitches.begin(), pitches.end(), 0.0) / static_cast<double>(pitches.size());
-            yaw   = std::accumulate(yaws.begin(),    yaws.end(),    0.0) / static_cast<double>(yaws.size());
+        double roll  = M_PI / 2.0 - std::acos(x / mag);
+        double pitch = M_PI / 2.0 - std::acos(y / mag);
+        double yaw   = roll;
 
-            vr::DriverPose_t pose = { 0 };
-            pose.qWorldFromDriverRotation.w = 1.0;
-            pose.qDriverFromHeadRotation.w  = 1.0;
-            pose.qRotation = HmdQuaternion_FromEulerAngles(roll, pitch, yaw);
-            pose.vecPosition[0] = 0.0;
-            pose.vecPosition[1] = 1.0;
-            pose.vecPosition[2] = 0.0;
-            pose.poseIsValid = true;
-            pose.deviceIsConnected = true;
-            pose.result = vr::TrackingResult_Running_OK;
-            pose.shouldApplyHeadModel = true;
-
-            {
-                std::lock_guard<std::mutex> lock(pose_mutex_);
-                latest_pose_ = pose;
-            }
-
-            vr::VRServerDriverHost()->TrackedDevicePoseUpdated(device_index_, GetPose(), sizeof(vr::DriverPose_t));
+        rolls.push_back(roll);
+        pitches.push_back(pitch);
+        yaws.push_back(yaw);
+        if (rolls.size() > 5) {
+            rolls.pop_front();
+            pitches.pop_front();
+            yaws.pop_front();
         }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        roll  = std::accumulate(rolls.begin(),   rolls.end(),   0.0) / static_cast<double>(rolls.size());
+        pitch = std::accumulate(pitches.begin(), pitches.end(), 0.0) / static_cast<double>(pitches.size());
+        yaw   = std::accumulate(yaws.begin(),    yaws.end(),    0.0) / static_cast<double>(yaws.size());
+
+        vr::DriverPose_t pose = { 0 };
+        pose.qWorldFromDriverRotation.w = 1.0;
+        pose.qDriverFromHeadRotation.w  = 1.0;
+        pose.qRotation = HmdQuaternion_FromEulerAngles(roll, pitch, yaw);
+        pose.vecPosition[0] = 0.0;
+        pose.vecPosition[1] = 1.0;
+        pose.vecPosition[2] = 0.0;
+        pose.poseIsValid = true;
+        pose.deviceIsConnected = true;
+        pose.result = vr::TrackingResult_Running_OK;
+        pose.shouldApplyHeadModel = true;
+
+        {
+            std::lock_guard<std::mutex> lock(pose_mutex_);
+            latest_pose_ = pose;
+        }
+
+        vr::VRServerDriverHost()->TrackedDevicePoseUpdated(device_index_, GetPose(), sizeof(vr::DriverPose_t));
     }
 }
 
