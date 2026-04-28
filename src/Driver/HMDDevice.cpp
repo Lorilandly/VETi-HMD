@@ -245,11 +245,7 @@ void HMDDevice::OnConnectChange(bool connected)
 
     {
         std::lock_guard<std::mutex> lock(pose_mutex_);
-        latest_pose_.deviceIsConnected = connected;
-        latest_pose_.poseIsValid       = connected;
-        latest_pose_.result            = connected
-            ? vr::TrackingResult_Running_OK
-            : vr::TrackingResult_Running_OutOfRange;
+        latest_pose_ = IVRDevice::MakeDefaultPose(connected);
     }
 
     auto idx = device_index_.load();

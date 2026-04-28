@@ -81,7 +81,7 @@ private:
     DisplayConfig display_config_;
 
     std::mutex       pose_mutex_;
-    vr::DriverPose_t latest_pose_ = IVRDevice::MakeDefaultPose();
+    vr::DriverPose_t latest_pose_ = IVRDevice::MakeDefaultPose(true);
 
     std::array<vr::VRInputComponentHandle_t, static_cast<size_t>(HMDInput::COUNT)> input_handles_{};
 

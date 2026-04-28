@@ -23,13 +23,13 @@ public:
     virtual DeviceType GetDeviceType() = 0;
 
     /// Makes a default device pose 
-    static inline vr::DriverPose_t MakeDefaultPose(bool connected = true, bool tracking = true) {
+    static inline vr::DriverPose_t MakeDefaultPose(bool connected = false) {
         vr::DriverPose_t pose = { 0 };
         pose.deviceIsConnected = connected;
-        pose.poseIsValid = tracking;
-        pose.result = tracking
+        pose.poseIsValid = connected;
+        pose.result = connected
             ? vr::TrackingResult_Running_OK
-            : vr::TrackingResult_Running_OutOfRange;
+            : vr::TrackingResult_Uninitialized;
         pose.willDriftInYaw = false;
         pose.shouldApplyHeadModel = false;
         pose.qDriverFromHeadRotation.w = 1.0;
