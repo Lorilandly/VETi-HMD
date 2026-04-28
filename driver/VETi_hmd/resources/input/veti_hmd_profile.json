@@ -1,6 +1,6 @@
 {
 	"jsonid": "input_profile",
-	"controller_type": "VETi_hmd",
+	"controller_type": "simplehmd",
 	"input_bindingui_mode": "hmd",
 	"input_source": {
 		"/input/system": {

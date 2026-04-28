@@ -1,4 +1,6 @@
 #include "HMDDevice.hpp"
+#include "AccelDevice.hpp"
+#include "ImuDevice.hpp"
 #include "EDID.hpp"
 
 #ifdef _WIN32
@@ -10,16 +12,50 @@
 
 #include <cmath>
 #include <cstring>
+#include <functional>
 
-static const char* kMainSection = "driver_VETi_hmd";
+static const char* kMainSection    = "driver_VETi_hmd";
 static const char* kDisplaySection = "VETi_hmd_display";
 
 namespace VETiDriver {
+
+// ── Construction helpers ───────────────────────────────────────────────────
+
+static std::vector<std::unique_ptr<IHidDevice>> MakeDevices()
+{
+    std::vector<std::unique_ptr<IHidDevice>> v;
+    v.push_back(std::make_unique<AccelDevice>());
+    v.push_back(std::make_unique<ImuDevice>());
+    return v;
+}
+
+static std::vector<HidReader::Candidate> BuildCandidates(
+    const std::vector<std::unique_ptr<IHidDevice>>& devices,
+    std::function<void(const vr::DriverPose_t&)>    apply_pose)
+{
+    std::vector<HidReader::Candidate> candidates;
+    for (const auto& d : devices) {
+        IHidDevice* raw = d.get();
+        candidates.push_back({
+            d->GetDescriptor(),
+            [apply_pose, raw](const uint8_t* data, size_t len) {
+                if (auto pose = raw->OnReport(data, len))
+                    apply_pose(*pose);
+            }
+        });
+    }
+    return candidates;
+}
 
 // ── HMDDevice ──────────────────────────────────────────────────────────────
 
 HMDDevice::HMDDevice(std::string serial)
     : serial_(std::move(serial))
+    , devices_(MakeDevices())
+    , hid_reader_(
+        BuildCandidates(devices_, [this](const vr::DriverPose_t& p){ ApplyPose(p); }),
+        [this](bool connected){ OnConnectChange(connected); }
+    )
 {
     // We have our model number and serial number stored in SteamVR settings.
     // Other IVRSettings methods (to get int32, floats, bools) return the data,
@@ -37,19 +73,6 @@ HMDDevice::HMDDevice(std::string serial)
 vr::EVRInitError HMDDevice::Activate(uint32_t unObjectId)
 {
     device_index_ = unObjectId;
-
-    // ── Open HID accelerometer ─────────────────────────────────────────
-    hid_init();
-    hid_device_info* head = hid_enumerate(0x04d8, 0x9f04);
-    for (hid_device_info* dev = head; dev; dev = dev->next) {
-        if (dev->product_string && wcscmp(dev->product_string, L"Accelerometer") == 0) {
-            hid_.reset(hid_open_path(dev->path));
-            break;
-        }
-    }
-    hid_free_enumeration(head);
-    if (hid_)
-        hid_set_nonblocking(hid_.get(), 0);
 
     // ── Display configuration ──────────────────────────────────────────
     char hwid_buf[9];
@@ -131,15 +154,14 @@ vr::EVRInitError HMDDevice::Activate(uint32_t unObjectId)
     // The wildcard {<driver_name>} matches the root folder location of our driver.
     vr::VRProperties()->SetStringProperty(container, vr::Prop_InputProfilePath_String, "{VETi_hmd}/input/veti_hmd_profile.json");
 
-    // Named icon paths for SteamVR status panel
-    vr::VRProperties()->SetStringProperty(container, vr::Prop_NamedIconPathDeviceReady_String,        "{VETi_hmd}/icons/hmd_ready.png");
-    vr::VRProperties()->SetStringProperty(container, vr::Prop_NamedIconPathDeviceOff_String,           "{VETi_hmd}/icons/hmd_not_ready.png");
-    vr::VRProperties()->SetStringProperty(container, vr::Prop_NamedIconPathDeviceSearching_String,     "{VETi_hmd}/icons/hmd_not_ready.png");
-    vr::VRProperties()->SetStringProperty(container, vr::Prop_NamedIconPathDeviceSearchingAlert_String,"{VETi_hmd}/icons/hmd_not_ready.png");
-    vr::VRProperties()->SetStringProperty(container, vr::Prop_NamedIconPathDeviceReadyAlert_String,    "{VETi_hmd}/icons/hmd_not_ready.png");
-    vr::VRProperties()->SetStringProperty(container, vr::Prop_NamedIconPathDeviceNotReady_String,      "{VETi_hmd}/icons/hmd_not_ready.png");
-    vr::VRProperties()->SetStringProperty(container, vr::Prop_NamedIconPathDeviceStandby_String,       "{VETi_hmd}/icons/hmd_not_ready.png");
-    vr::VRProperties()->SetStringProperty(container, vr::Prop_NamedIconPathDeviceAlertLow_String,      "{VETi_hmd}/icons/hmd_not_ready.png");
+    vr::VRProperties()->SetStringProperty(container, vr::Prop_NamedIconPathDeviceReady_String,          "{VETi_hmd}/icons/hmd_ready.png");
+    vr::VRProperties()->SetStringProperty(container, vr::Prop_NamedIconPathDeviceOff_String,            "{VETi_hmd}/icons/hmd_not_ready.png");
+    vr::VRProperties()->SetStringProperty(container, vr::Prop_NamedIconPathDeviceSearching_String,      "{VETi_hmd}/icons/hmd_not_ready.png");
+    vr::VRProperties()->SetStringProperty(container, vr::Prop_NamedIconPathDeviceSearchingAlert_String, "{VETi_hmd}/icons/hmd_not_ready.png");
+    vr::VRProperties()->SetStringProperty(container, vr::Prop_NamedIconPathDeviceReadyAlert_String,     "{VETi_hmd}/icons/hmd_not_ready.png");
+    vr::VRProperties()->SetStringProperty(container, vr::Prop_NamedIconPathDeviceNotReady_String,       "{VETi_hmd}/icons/hmd_not_ready.png");
+    vr::VRProperties()->SetStringProperty(container, vr::Prop_NamedIconPathDeviceStandby_String,        "{VETi_hmd}/icons/hmd_not_ready.png");
+    vr::VRProperties()->SetStringProperty(container, vr::Prop_NamedIconPathDeviceAlertLow_String,       "{VETi_hmd}/icons/hmd_not_ready.png");
 
     // ── Input ──────────────────────────────────────────────────────────
     vr::VRDriverInput()->CreateBooleanComponent(container, "/input/system/touch",
@@ -147,10 +169,10 @@ vr::EVRInitError HMDDevice::Activate(uint32_t unObjectId)
     vr::VRDriverInput()->CreateBooleanComponent(container, "/input/system/click",
         &input_handles_[static_cast<size_t>(HMDInput::SystemClick)]);
 
-    // ── Start pose thread ──────────────────────────────────────────────
+    // ── Start HID reader ───────────────────────────────────────────────
     is_active_ = true;
     vr::VRServerDriverHost()->TrackedDevicePoseUpdated(device_index_, GetPose(), sizeof(vr::DriverPose_t));
-    pose_update_thread_ = std::thread(&HMDDevice::PoseUpdateThread, this);
+    hid_reader_.Start();
 
     return vr::VRInitError_None;
 }
@@ -160,7 +182,7 @@ vr::EVRInitError HMDDevice::Activate(uint32_t unObjectId)
 void HMDDevice::Deactivate()
 {
     if (is_active_.exchange(false))
-        pose_update_thread_.join();
+        hid_reader_.Stop();
     device_index_ = vr::k_unTrackedDeviceIndexInvalid;
 }
 
@@ -204,46 +226,35 @@ std::string HMDDevice::GetSerial() { return serial_; }
 vr::TrackedDeviceIndex_t HMDDevice::GetDeviceIndex() { return device_index_; }
 DeviceType HMDDevice::GetDeviceType() { return DeviceType::HMD; }
 
-// ── Pose thread ────────────────────────────────────────────────────────────
+// ── Pose helpers ───────────────────────────────────────────────────────────
 
-void HMDDevice::PoseUpdateThread()
+// Called from the HidReader thread via a device's OnReport return value.
+void HMDDevice::ApplyPose(const vr::DriverPose_t& pose)
 {
-    while (is_active_) {
-        if (!hid_) break;
-
-        // Block the thread in the kernel until the OS delivers a HID report from
-        // the device. No CPU is consumed while waiting. The 100ms timeout is not
-        // a polling interval — it exists solely so the loop can re-evaluate
-        // is_active_ and exit promptly when Deactivate() is called, rather than
-        // blocking indefinitely waiting for a report that may never arrive.
-        float accel[3];
-        int bytes = hid_read_timeout(hid_.get(), reinterpret_cast<unsigned char*>(accel), sizeof(accel), 100);
-
-        if (bytes < 0) break;     // device error or disconnected
-        if (bytes == 0) continue; // 100ms elapsed with no report; re-check is_active_
-
-        double acc_d[3] = { accel[0], accel[1], accel[2] };
-        acc_filter_.update(acc_d);
-
-        vr::DriverPose_t pose = { 0 };
-        pose.qWorldFromDriverRotation.w = 1.0;
-        pose.qDriverFromHeadRotation.w  = 1.0;
-        pose.qRotation = acc_filter_.getQuat();
-        pose.vecPosition[0] = 0.0;
-        pose.vecPosition[1] = 1.0;
-        pose.vecPosition[2] = 0.0;
-        pose.poseIsValid = true;
-        pose.deviceIsConnected = true;
-        pose.result = vr::TrackingResult_Running_OK;
-        pose.shouldApplyHeadModel = true;
-
-        {
-            std::lock_guard<std::mutex> lock(pose_mutex_);
-            latest_pose_ = pose;
-        }
-
-        vr::VRServerDriverHost()->TrackedDevicePoseUpdated(device_index_, GetPose(), sizeof(vr::DriverPose_t));
+    {
+        std::lock_guard<std::mutex> lock(pose_mutex_);
+        latest_pose_ = pose;
     }
+    vr::VRServerDriverHost()->TrackedDevicePoseUpdated(device_index_, GetPose(), sizeof(vr::DriverPose_t));
+}
+
+// Called from the HidReader thread when the connection state changes.
+void HMDDevice::OnConnectChange(bool connected)
+{
+    DriverLog("VETi HMD: HID device %s", connected ? "connected" : "disconnected");
+
+    {
+        std::lock_guard<std::mutex> lock(pose_mutex_);
+        latest_pose_.deviceIsConnected = connected;
+        latest_pose_.poseIsValid       = connected;
+        latest_pose_.result            = connected
+            ? vr::TrackingResult_Running_OK
+            : vr::TrackingResult_Running_OutOfRange;
+    }
+
+    auto idx = device_index_.load();
+    if (idx != vr::k_unTrackedDeviceIndexInvalid)
+        vr::VRServerDriverHost()->TrackedDevicePoseUpdated(idx, GetPose(), sizeof(vr::DriverPose_t));
 }
 
 // ── IVRDisplayComponent ───────────────────────────────────────────────────

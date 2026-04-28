@@ -4,15 +4,15 @@
 #include <array>
 #include <mutex>
 #include <atomic>
-#include <thread>
 #include <memory>
+#include <vector>
 #include <cstdint>
 
 #include <openvr_driver.h>
-#include <hidapi.h>
 
 #include "IVRDevice.hpp"
-#include "utils/AccelOrientationFilter.hpp"
+#include "IHidDevice.hpp"
+#include "HidReader.hpp"
 
 namespace VETiDriver {
 
@@ -69,29 +69,26 @@ public:
     bool ComputeInverseDistortion(vr::HmdVector2_t* pResult, vr::EVREye eEye, uint32_t unChannel, float fU, float fV) override;
 
 private:
-    void PoseUpdateThread();
-
-    static constexpr double kAccTau = 0.1;   // Butterworth LPF time constant (seconds)
-    static constexpr double kAccTs  = 0.01;  // assumed sample period (seconds, 100 Hz)
+    void ApplyPose(const vr::DriverPose_t& pose);
+    void OnConnectChange(bool connected);
 
     std::string serial_;
     std::string model_number_;
 
-    std::atomic<bool> is_active_{false};
+    std::atomic<bool>     is_active_{false};
     std::atomic<uint32_t> device_index_{vr::k_unTrackedDeviceIndexInvalid};
 
     DisplayConfig display_config_;
-    std::unique_ptr<hid_device, decltype(&hid_close)> hid_{nullptr, &hid_close};
 
-    std::mutex pose_mutex_;
-
+    std::mutex       pose_mutex_;
     vr::DriverPose_t latest_pose_ = IVRDevice::MakeDefaultPose();
-
-    AccelOrientationFilter acc_filter_{kAccTau, kAccTs};
 
     std::array<vr::VRInputComponentHandle_t, static_cast<size_t>(HMDInput::COUNT)> input_handles_{};
 
-    std::thread pose_update_thread_;
+    // devices_ must be declared before hid_reader_ — members are constructed in
+    // declaration order, and hid_reader_ captures raw pointers into this vector.
+    std::vector<std::unique_ptr<IHidDevice>> devices_;
+    HidReader hid_reader_;
 };
 
 } // namespace VETiDriver
