@@ -10,7 +10,6 @@
 
 #include <cmath>
 #include <cstring>
-#include <numeric>
 
 static const char* kMainSection = "driver_VETi_hmd";
 static const char* kDisplaySection = "VETi_hmd_display";
@@ -95,6 +94,8 @@ vr::EVRInitError HMDDevice::Activate(uint32_t unObjectId)
 
     display_config_.render_width = display_config_.window_width;
     display_config_.render_height = display_config_.window_height;
+    display_config_.display_x_offset = vr::VRSettings()->GetFloat(kDisplaySection, "display_x_offset");
+    display_config_.display_y_offset = vr::VRSettings()->GetFloat(kDisplaySection, "display_y_offset");
     display_config_.l_display_rotation = vr::VRSettings()->GetFloat(kDisplaySection, "l_display_rotation");
     display_config_.r_display_rotation = vr::VRSettings()->GetFloat(kDisplaySection, "r_display_rotation");
 
@@ -207,8 +208,6 @@ DeviceType HMDDevice::GetDeviceType() { return DeviceType::HMD; }
 
 void HMDDevice::PoseUpdateThread()
 {
-    std::deque<double> rolls, pitches, yaws;
-
     while (is_active_) {
         if (!hid_) break;
 
@@ -223,34 +222,13 @@ void HMDDevice::PoseUpdateThread()
         if (bytes < 0) break;     // device error or disconnected
         if (bytes == 0) continue; // 100ms elapsed with no report; re-check is_active_
 
-        double x = accel[0], y = accel[1], z = accel[2];
-        double mag = std::sqrt(x * x + y * y + z * z);
-
-        constexpr double kMinMagnitude = 1e-6;
-        if (mag < kMinMagnitude)
-            continue;
-
-        double roll  = M_PI / 2.0 - std::acos(x / mag);
-        double pitch = M_PI / 2.0 - std::acos(y / mag);
-        double yaw   = roll;
-
-        rolls.push_back(roll);
-        pitches.push_back(pitch);
-        yaws.push_back(yaw);
-        if (rolls.size() > 5) {
-            rolls.pop_front();
-            pitches.pop_front();
-            yaws.pop_front();
-        }
-
-        roll  = std::accumulate(rolls.begin(),   rolls.end(),   0.0) / static_cast<double>(rolls.size());
-        pitch = std::accumulate(pitches.begin(), pitches.end(), 0.0) / static_cast<double>(pitches.size());
-        yaw   = std::accumulate(yaws.begin(),    yaws.end(),    0.0) / static_cast<double>(yaws.size());
+        double acc_d[3] = { accel[0], accel[1], accel[2] };
+        acc_filter_.update(acc_d);
 
         vr::DriverPose_t pose = { 0 };
         pose.qWorldFromDriverRotation.w = 1.0;
         pose.qDriverFromHeadRotation.w  = 1.0;
-        pose.qRotation = HmdQuaternion_FromEulerAngles(roll, pitch, yaw);
+        pose.qRotation = acc_filter_.getQuat();
         pose.vecPosition[0] = 0.0;
         pose.vecPosition[1] = 1.0;
         pose.vecPosition[2] = 0.0;
@@ -312,6 +290,11 @@ void HMDDevice::GetProjectionRaw(vr::EVREye, float* pfLeft, float* pfRight, floa
 
 vr::DistortionCoordinates_t HMDDevice::ComputeDistortion(vr::EVREye eEye, float fU, float fV)
 {
+    // Apply display offset before rotation (flips sign per eye)
+    float sign = (eEye == vr::Eye_Left) ? 1.0f : -1.0f;
+    fU += sign * static_cast<float>(display_config_.display_x_offset) / 4.0f;
+    fV += sign * static_cast<float>(display_config_.display_y_offset) / 4.0f;
+
     double angle = (eEye == vr::Eye_Left)
         ? DEG_TO_RAD(display_config_.l_display_rotation)
         : DEG_TO_RAD(display_config_.r_display_rotation);

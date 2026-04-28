@@ -8,6 +8,8 @@
 		"HwId": "TDO0103",
 		"window_width": 3840,
 		"window_height": 1920,
+		"display_x_offset": 0.0,
+		"display_y_offset": 0.0,
 		"l_display_rotation": 0.0,
 		"r_display_rotation": 0.0,
 		"vsync_to_photons": 0.011,

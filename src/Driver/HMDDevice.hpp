@@ -2,7 +2,6 @@
 
 #include <string>
 #include <array>
-#include <deque>
 #include <mutex>
 #include <atomic>
 #include <thread>
@@ -13,6 +12,7 @@
 #include <hidapi.h>
 
 #include "IVRDevice.hpp"
+#include "utils/AccelOrientationFilter.hpp"
 
 namespace VETiDriver {
 
@@ -25,6 +25,8 @@ struct DisplayConfig {
     int32_t render_width = 1920;
     int32_t render_height = 1080;
     bool on_desktop = false;
+    double display_x_offset = 0.0;
+    double display_y_offset = 0.0;
     double l_display_rotation = 0.0;
     double r_display_rotation = 0.0;
 };
@@ -69,6 +71,9 @@ public:
 private:
     void PoseUpdateThread();
 
+    static constexpr double kAccTau = 0.1;   // Butterworth LPF time constant (seconds)
+    static constexpr double kAccTs  = 0.01;  // assumed sample period (seconds, 100 Hz)
+
     std::string serial_;
     std::string model_number_;
 
@@ -81,6 +86,8 @@ private:
     std::mutex pose_mutex_;
 
     vr::DriverPose_t latest_pose_ = IVRDevice::MakeDefaultPose();
+
+    AccelOrientationFilter acc_filter_{kAccTau, kAccTs};
 
     std::array<vr::VRInputComponentHandle_t, static_cast<size_t>(HMDInput::COUNT)> input_handles_{};
 
